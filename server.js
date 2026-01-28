@@ -1,36 +1,37 @@
 const express = require('express');
+const fetch = require('node-fetch');
 const path = require('path');
  
 const app = express();
 app.use(express.json());
 app.use(express.static('public'));
  
-// Mock Database - Student Data
+// Mock database - All students have completed onboarding
 const mockDatabase = {
   'STU001': {
     student_id: 'STU001',
-    profile_completed: false,
-    tutorial_completed: false,
-    documents_submitted: false,
-    preferences_set: false,
-    current_step: 'profile_setup',
+    profile_completed: true,
+    tutorial_completed: true,
+    documents_submitted: true,
+    preferences_set: true,
+    current_step: 'completed',
     onboarding_started_at: '2024-01-15T10:00:00Z',
-    onboarding_completed_at: null,
-    created_at: '2024-01-15T09:00:00Z',
-    updated_at: '2024-01-15T10:00:00Z',
+    onboarding_completed_at: '2024-01-16T14:00:00Z',
+    created_at: '2024-01-15T10:00:00Z',
+    updated_at: '2024-01-25T09:00:00Z',
     email: 'student001@example.com'
   },
   'STU002': {
     student_id: 'STU002',
     profile_completed: true,
-    tutorial_completed: false,
-    documents_submitted: false,
-    preferences_set: false,
-    current_step: 'tutorial',
+    tutorial_completed: true,
+    documents_submitted: true,
+    preferences_set: true,
+    current_step: 'completed',
     onboarding_started_at: '2024-01-10T08:00:00Z',
-    onboarding_completed_at: null,
+    onboarding_completed_at: '2024-01-11T16:00:00Z',
     created_at: '2024-01-10T08:00:00Z',
-    updated_at: '2024-01-20T14:00:00Z',
+    updated_at: '2024-01-26T11:00:00Z',
     email: 'student002@example.com'
   },
   'STU003': {
@@ -40,310 +41,63 @@ const mockDatabase = {
     documents_submitted: true,
     preferences_set: true,
     current_step: 'completed',
-    onboarding_started_at: '2024-01-05T09:00:00Z',
-    onboarding_completed_at: '2024-01-06T15:00:00Z',
-    created_at: '2024-01-05T09:00:00Z',
-    updated_at: '2024-01-06T15:00:00Z',
+    onboarding_started_at: '2024-01-20T09:00:00Z',
+    onboarding_completed_at: '2024-01-21T10:00:00Z',
+    created_at: '2024-01-20T09:00:00Z',
+    updated_at: '2024-01-27T15:00:00Z',
     email: 'student003@example.com'
   }
 };
  
-// Store active chat sessions
+// Session storage
 const sessions = {};
  
-// Serve marks.html as default
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'marks.html'));
-});
- 
-// Start chat session
-app.post('/api/start-chat', async (req, res) => {
-  const { studentId, providedMarks } = req.body;
-  // Get student data (or create default if not found)
-  const studentData = mockDatabase[studentId] || {
-    student_id: studentId,
-    profile_completed: false,
-    tutorial_completed: false,
-    documents_submitted: false,
-    preferences_set: false,
-    current_step: 'profile_setup',
-    onboarding_started_at: new Date().toISOString(),
-    onboarding_completed_at: null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    email: null
-  };
-  // Initialize session
-  sessions[studentId] = {
-    studentData: studentData,
-    providedMarks: providedMarks || {},
-    collectedMarks: { ...providedMarks } || {},
-    answers: {},
-    currentQuestion: 0,
-    questions: []
-  };
-  // Build question list
-  const questions = buildQuestions(providedMarks || {});
-  sessions[studentId].questions = questions;
-  // Get first question
-  if (questions.length > 0) {
-    const firstQuestion = questions[0];
-    const naturalQuestion = await makeQuestionNatural(firstQuestion.text);
-    res.json({ message: naturalQuestion });
-  } else {
-    // No questions needed, go straight to prediction
-    const prediction = predictDropout(studentData, providedMarks || {});
-    const subjectAdvice = prediction.willDropout ? null : analyzeSubjects(providedMarks || {});
-    const finalMessage = await generateFinalMessage(prediction, subjectAdvice);
-    res.json({
-      completed: true,
-      prediction: prediction,
-      subjectRecommendations: subjectAdvice,
-      message: finalMessage
-    });
-  }
-});
- 
-// Handle chat messages
-app.post('/api/chat', async (req, res) => {
-  const { studentId, message } = req.body;
-  const session = sessions[studentId];
-  if (!session) {
-    return res.status(400).json({ error: 'Session not found' });
-  }
-  // Store conversation for AI analysis
-  if (!session.conversationContext) {
-    session.conversationContext = { messages: [] };
-  }
-  session.conversationContext.messages.push(`User: ${message}`);
-  // Parse and store answer
-  const currentQuestion = session.questions[session.currentQuestion];
-  const answer = parseAnswer(message, currentQuestion);
-  session.answers[currentQuestion.id] = answer;
-  // Store marks if it's a score question
-  if (currentQuestion.id.endsWith('_score') && answer !== null) {
-    const subject = currentQuestion.id.replace('_score', '');
-    session.collectedMarks[subject] = answer;
-    // ✨ NEW: Check if AI follow-up needed
-    const followUp = await checkForFollowUp(subject, answer, session.studentData);
-    if (followUp) {
-      session.conversationContext.messages.push(`Bot: ${followUp}`);
-      return res.json({
-        message: followUp,
-        completed: false,
-        isFollowUp: true
-      });
-    }
-  }
-  // Move to next question
-  session.currentQuestion++;
-  // Check if all questions answered
-  if (session.currentQuestion >= session.questions.length) {
-    // ✨ ENHANCED: Use AI-enhanced prediction
-    const prediction = await predictDropout(
-      session.studentData, 
-      session.collectedMarks,
-      session.conversationContext
-    );
-    const subjectAdvice = prediction.willDropout ? null : analyzeSubjects(session.collectedMarks);
-    const finalMessage = await generateFinalMessage(prediction, subjectAdvice);
-    return res.json({
-      completed: true,
-      prediction: prediction,
-      subjectRecommendations: subjectAdvice,
-      message: finalMessage
-    });
-  }
-  // Ask next question
-  const nextQuestion = session.questions[session.currentQuestion];
-  const naturalQuestion = await makeQuestionNatural(nextQuestion.text);
-  session.conversationContext.messages.push(`Bot: ${naturalQuestion}`);
-  res.json({
-    message: naturalQuestion,
-    completed: false
-  });
-});
- 
-// After collecting a subject's marks, check if follow-up needed
-async function checkForFollowUp(subject, score, studentData) {
-  // Rule-based triggers for AI follow-up
-  if (score < 35) {
-    // Critical score - ask about support
-    return await generateAIFollowUp({
-      subject: subject,
-      score: score,
-      context: 'failing',
-      prompt: `Student scored ${score}% in ${subject}. Ask ONE empathetic question about tutoring or support available.`
-    });
-  } else if (score < 50 && !studentData.tutorial_completed) {
-    // Struggling + no tutorial
-    return await generateAIFollowUp({
-      subject: subject,
-      score: score,
-      context: 'struggling_no_support',
-      prompt: `Student scored ${score}% in ${subject} and hasn't completed tutorial. Ask if they need help understanding the material.`
-    });
-  }
-  return null; // No follow-up needed
-}
- 
-async function generateAIFollowUp(context) {
-  const response = await fetch('http://localhost:11434/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'llama3.2:1b',
-      messages: [{
-        role: 'user',
-        content: context.prompt + ' Keep it to ONE sentence, friendly and supportive.'
-      }],
-      stream: false
-    })
-  });
-  const data = await response.json();
-  let followUp = data.message.content;
-  followUp = followUp.replace(/<\|start_header_id\|>.*?<\|end_header_id\|>/g, '').trim();
-  return followUp;
-}
-
-async function predictDropout(studentData, marks, conversationContext) {
-  // Phase A: Rule-based calculation (fast, reliable)
-  const ruleBasedScore = calculateRiskScore(studentData, marks);
-  // Phase B: AI analyzes conversation for hidden signals (smart)
-  const aiInsights = await analyzeConversationWithAI(conversationContext);
-  // Phase C: Combine both
-  const finalPrediction = {
-    riskScore: ruleBasedScore.score,
-    riskLevel: ruleBasedScore.level,
-    willDropout: ruleBasedScore.score >= 60,
-    reasons: [...ruleBasedScore.reasons, ...aiInsights.additionalRisks],
-    aiInsights: aiInsights.summary
-  };
-  return finalPrediction;
-}
- 
-async function analyzeConversationWithAI(context) {
-  const prompt = `Analyze this student conversation for dropout risk signals:
- 
-Conversation:
-${context.messages.join('\n')}
- 
-Identify:
-1. Emotional state (motivated/discouraged/neutral)
-2. Support system (has help/isolated)
-3. Engagement level (active/passive)
- 
-Return JSON:
-{
-  "emotionalState": "...",
-  "hasSupport": true/false,
-  "engagementLevel": "...",
-  "additionalRisks": ["risk1", "risk2"],
-  "summary": "brief analysis"
-}`;
- 
-  try {
-    const response = await fetch('http://localhost:11434/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'llama3.2:1b',
-        messages: [{ role: 'user', content: prompt }],
-        stream: false
-      })
-    });
-    const data = await response.json();
-    let content = data.message.content;
-    content = content.replace(/<\|start_header_id\|>.*?<\|end_header_id\|>/g, '').trim();
-    // Try to parse JSON, fallback if fails
-    try {
-      return JSON.parse(content);
-    } catch {
-      return {
-        emotionalState: 'neutral',
-        hasSupport: false,
-        engagementLevel: 'unknown',
-        additionalRisks: [],
-        summary: 'Unable to analyze conversation'
-      };
-    }
-  } catch (error) {
-    console.error('AI analysis error:', error);
-    return {
-      emotionalState: 'neutral',
-      hasSupport: false,
-      engagementLevel: 'unknown',
-      additionalRisks: [],
-      summary: 'Analysis unavailable'
-    };
-  }
-}
- 
-function calculateRiskScore(studentData, marks) {
-  // Your existing rule-based logic
-  let score = 0;
-  const reasons = [];
-  // Onboarding factors
-  if (!studentData.profile_completed) {
-    score += 25;
-    reasons.push("Profile not completed");
-  }
-  // Academic factors
-  const avgMarks = calculateAverage(marks);
-  if (avgMarks < 40) {
-    score += 25;
-    reasons.push(`Low average: ${avgMarks}%`);
-  }
-  // Time factors
-  const daysSinceStart = getDaysSince(studentData.onboarding_started_at);
-  if (daysSinceStart > 14) {
-    score += 25;
-    reasons.push(`${daysSinceStart} days since start`);
-  }
-  return {
-    score: Math.min(score, 100),
-    level: score >= 70 ? 'HIGH' : score >= 50 ? 'MEDIUM' : 'LOW',
-    reasons: reasons
-  };
-}
-
-// Build question list (skip subjects with provided marks)
+// Build 5 key questions
 function buildQuestions(providedMarks) {
-  const questions = [];
-  const subjects = ['english', 'marathi', 'hindi', 'social_science', 'science', 'maths'];
-  subjects.forEach(subject => {
-    // Only ask if mark not provided
-    if (providedMarks[subject] === undefined || providedMarks[subject] === null) {
-      questions.push({
-        id: `has_${subject}`,
-        text: `Do you have marks for ${subject.replace('_', ' ')}? (yes/no)`,
-        type: 'yesno'
-      });
-      questions.push({
-        id: `${subject}_score`,
-        text: `What is your ${subject.replace('_', ' ')} score? (0-100)`,
-        type: 'number',
-        condition: `has_${subject}`
-      });
+  const questions = [
+    {
+      id: 'study_hours',
+      text: 'How many hours do you study per day on average?',
+      type: 'number'
+    },
+    {
+      id: 'attendance',
+      text: 'What is your average class attendance percentage? (0-100)',
+      type: 'number'
+    },
+    {
+      id: 'support_system',
+      text: 'Do you have access to tutoring or academic support when you need help? (yes/no)',
+      type: 'yesno'
+    },
+    {
+      id: 'motivation',
+      text: 'On a scale of 1-10, how motivated do you feel about your studies?',
+      type: 'number'
+    },
+    {
+      id: 'challenges',
+      text: 'What is your biggest challenge in your studies? (understanding concepts/time management/lack of resources/personal issues)',
+      type: 'text'
     }
-  });
+  ];
   return questions;
 }
  
-// Parse user answer
+// Parse answer based on question type
 function parseAnswer(message, question) {
-  const lower = message.toLowerCase().trim();
-  // Yes/No questions
+  const lowerMessage = message.toLowerCase().trim();
   if (question.type === 'yesno') {
-    return lower.includes('yes') || lower === 'y';
-  }
-  // Number questions
-  if (question.type === 'number') {
-    const num = message.match(/\d+/);
-    if (num && num[0] >= 0 && num[0] <= 100) {
-      return parseInt(num[0]);
-    }
+    if (lowerMessage.includes('yes') || lowerMessage.includes('y')) return true;
+    if (lowerMessage.includes('no') || lowerMessage.includes('n')) return false;
     return null;
+  }
+  if (question.type === 'number') {
+    const num = parseFloat(message);
+    return isNaN(num) ? null : num;
+  }
+  if (question.type === 'text') {
+    return message.trim();
   }
   return message;
 }
@@ -357,81 +111,26 @@ async function makeQuestionNatural(question) {
       body: JSON.stringify({
         model: 'llama3.2:1b',
         messages: [{
-          role: 'user',  // Changed from 'system' to 'user'
+          role: 'user',
           content: `Rephrase this question in a friendly, conversational way (1 sentence): "${question}"`
         }],
         stream: false
       })
     });
     const data = await response.json();
-    // Clean up the response - remove special tokens
     let cleanMessage = data.message.content;
     cleanMessage = cleanMessage.replace(/<\|start_header_id\|>.*?<\|end_header_id\|>/g, '');
     cleanMessage = cleanMessage.replace(/\n+/g, ' ').trim();
-    return cleanMessage || question; // Fallback to original if empty
+    return cleanMessage || question;
   } catch (error) {
     console.error('Ollama error:', error);
-    return question; // Fallback to original question if AI fails
+    return question;
   }
 }
-
-// Predict dropout
-function predictDropout(studentData, marks) {
-  let dropoutRisk = 0;
-  const reasons = [];
-  // Onboarding factors
-  if (!studentData.profile_completed) {
-    dropoutRisk += 25;
-    reasons.push("Profile not completed");
-  }
-  if (!studentData.tutorial_completed) {
-    dropoutRisk += 20;
-    reasons.push("Tutorial not completed");
-  }
-  if (!studentData.documents_submitted) {
-    dropoutRisk += 15;
-    reasons.push("Documents not submitted");
-  }
-  if (!studentData.preferences_set) {
-    dropoutRisk += 10;
-    reasons.push("Preferences not set");
-  }
-  // Current step risk
-  const stepRisk = {
-    'profile_setup': 30,
-    'tutorial': 20,
-    'document_upload': 15,
-    'preferences': 10,
-    'completed': 0
-  };
-  const currentStepRisk = stepRisk[studentData.current_step] || 0;
-  if (currentStepRisk > 0) {
-    dropoutRisk += currentStepRisk;
-    reasons.push(`Stuck at step: ${studentData.current_step}`);
-  }
-  // Time-based factors
-  const daysSinceStart = getDaysSince(studentData.onboarding_started_at);
-  if (daysSinceStart > 14) {
-    dropoutRisk += 25;
-    reasons.push(`${daysSinceStart} days since onboarding started`);
-  } else if (daysSinceStart > 7) {
-    dropoutRisk += 15;
-    reasons.push(`${daysSinceStart} days in onboarding`);
-  }
-  const daysSinceUpdate = getDaysSince(studentData.updated_at);
-  if (daysSinceUpdate > 7) {
-    dropoutRisk += 20;
-    reasons.push(`No activity for ${daysSinceUpdate} days`);
-  } else if (daysSinceUpdate > 3) {
-    dropoutRisk += 10;
-    reasons.push(`Inactive for ${daysSinceUpdate} days`);
-  }
-  // Email validation
-  if (!studentData.email || studentData.email === 'null') {
-    dropoutRisk += 15;
-    reasons.push("No valid email provided");
-  }
-  // Academic performance
+ 
+// AI-generated prediction based on marks and answers
+async function generateAIPrediction(marks, answers, conversationContext) {
+  // Calculate average marks
   const subjects = ['english', 'marathi', 'hindi', 'social_science', 'science', 'maths'];
   let totalMarks = 0;
   let subjectCount = 0;
@@ -444,100 +143,41 @@ function predictDropout(studentData, marks) {
       if (mark < 35) failedSubjects++;
     }
   });
-  if (failedSubjects >= 3) {
-    dropoutRisk += 30;
-    reasons.push(`Failed ${failedSubjects} subjects`);
-  } else if (failedSubjects >= 2) {
-    dropoutRisk += 20;
-    reasons.push(`Failed ${failedSubjects} subjects`);
-  }
   const avgMarks = subjectCount > 0 ? totalMarks / subjectCount : 0;
-  if (avgMarks > 0 && avgMarks < 40) {
-    dropoutRisk += 25;
-    reasons.push(`Low average: ${avgMarks.toFixed(1)}%`);
-  } else if (avgMarks > 0 && avgMarks < 50) {
-    dropoutRisk += 15;
-    reasons.push(`Below average: ${avgMarks.toFixed(1)}%`);
-  }
-  return {
-    willDropout: dropoutRisk >= 60,
-    riskLevel: dropoutRisk >= 80 ? 'HIGH' : dropoutRisk >= 60 ? 'MEDIUM' : 'LOW',
-    riskScore: Math.min(dropoutRisk, 100),
-    reasons: reasons,
-    recommendation: getRecommendation(dropoutRisk)
-  };
+  // Build comprehensive prompt for AI
+  const prompt = `You are an academic counselor analyzing student dropout risk.
+ 
+STUDENT DATA:
+- Average Marks: ${avgMarks.toFixed(1)}%
+- Failed Subjects: ${failedSubjects} out of ${subjectCount}
+- Study Hours per Day: ${answers.study_hours || 'Not provided'}
+- Attendance: ${answers.attendance || 'Not provided'}%
+- Has Support System: ${answers.support_system ? 'Yes' : 'No'}
+- Motivation Level: ${answers.motivation || 'Not provided'}/10
+- Biggest Challenge: ${answers.challenges || 'Not provided'}
+ 
+CONVERSATION:
+${conversationContext.messages.join('\n')}
+ 
+TASK:
+Analyze this student's dropout risk and provide a prediction.
+ 
+Return ONLY valid JSON in this exact format (no extra text):
+{
+  "willDropout": true or false,
+  "riskLevel": "HIGH" or "MEDIUM" or "LOW",
+  "riskScore": number between 0-100,
+  "reasons": ["reason1", "reason2", "reason3"],
+  "recommendation": "detailed personalized recommendation (2-3 sentences)",
+  "analysis": "brief analysis of key factors (1-2 sentences)"
 }
  
-// Analyze subjects
-function analyzeSubjects(marks) {
-  const analysis = {
-    weakSubjects: [],
-    strongSubjects: [],
-    criticalSubjects: [],
-    needsImprovement: [],
-    recommendations: []
-  };
-  Object.entries(marks).forEach(([subject, score]) => {
-    if (score === null || score === undefined) return;
-    if (score < 35) {
-      analysis.criticalSubjects.push({ subject, score });
-      analysis.recommendations.push({
-        subject: subject,
-        message: `${subject.toUpperCase()}: CRITICAL - Score ${score}%. Immediate tutoring needed.`,
-        priority: 1
-      });
-    } else if (score < 50) {
-      analysis.needsImprovement.push({ subject, score });
-      analysis.recommendations.push({
-        subject: subject,
-        message: `${subject.toUpperCase()}: Needs improvement - Score ${score}%. Practice 30 min daily.`,
-        priority: 2
-      });
-    } else if (score < 60) {
-      analysis.weakSubjects.push({ subject, score });
-      analysis.recommendations.push({
-        subject: subject,
-        message: `${subject.toUpperCase()}: Average - Score ${score}%. Review weak topics.`,
-        priority: 3
-      });
-    } else {
-      analysis.strongSubjects.push({ subject, score });
-    }
-  });
-  analysis.recommendations.sort((a, b) => a.priority - b.priority);
-  return analysis;
-}
- 
-// Helper functions
-function getDaysSince(dateString) {
-  if (!dateString) return 0;
-  const date = new Date(dateString);
-  const now = new Date();
-  return Math.floor((now - date) / (1000 * 60 * 60 * 24));
-}
- 
-function getRecommendation(score) {
-  if (score >= 70) {
-    return "URGENT: Immediate intervention needed. Assign mentor and schedule counseling.";
-  } else if (score >= 50) {
-    return "MODERATE RISK: Follow up within 48 hours. Offer academic support.";
-  } else {
-    return "LOW RISK: Continue monitoring. Send encouraging messages.";
-  }
-}
-
-// Generate final message using Ollama
-async function generateFinalMessage(prediction, subjectAdvice) {
-  const prompt = prediction.willDropout 
-    ? `Student is at ${prediction.riskLevel} risk of dropping out.
-Risk Score: ${prediction.riskScore}/100
-Reasons: ${prediction.reasons.join(', ')}
- 
-Provide supportive, encouraging message about completing onboarding. Keep it 3-4 sentences.`
-    : `Student will likely complete onboarding! Risk: ${prediction.riskLevel}
-${subjectAdvice ? `Weak subjects: ${subjectAdvice.recommendations.map(r => r.subject).join(', ')}` : ''}
- 
-Congratulate them and provide specific study recommendations. Keep it encouraging and actionable in 4-5 sentences.`;
+GUIDELINES:
+- HIGH risk (70-100): Multiple failing grades, low attendance, no support, low motivation
+- MEDIUM risk (40-69): Some struggles but has support or motivation
+- LOW risk (0-39): Good grades, regular attendance, motivated
+- Be specific and actionable in recommendations
+- Consider both academic and non-academic factors`;
  
   try {
     const response = await fetch('http://localhost:11434/api/chat', {
@@ -545,25 +185,197 @@ Congratulate them and provide specific study recommendations. Keep it encouragin
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'llama3.2:1b',
-        messages: [{ 
-          role: 'user',  // Changed from 'system' to 'user'
-          content: prompt 
-        }],
+        messages: [{ role: 'user', content: prompt }],
         stream: false
       })
     });
     const data = await response.json();
-    // Clean up the response
-    let cleanMessage = data.message.content;
-    cleanMessage = cleanMessage.replace(/<\|start_header_id\|>.*?<\|end_header_id\|>/g, '');
-    cleanMessage = cleanMessage.replace(/\n+/g, ' ').trim();
-    return cleanMessage || `Assessment complete. Risk Level: ${prediction.riskLevel}. ${prediction.recommendation}`;
+    let content = data.message.content;
+    // Clean up response
+    content = content.replace(/<\|start_header_id\|>.*?<\|end_header_id\|>/g, '');
+    content = content.replace(/```json/g, '');
+    content = content.replace(/```/g, '');
+    content = content.trim();
+    console.log('AI Response:', content);
+    // Try to parse JSON
+    try {
+      const prediction = JSON.parse(content);
+      // Validate and set defaults if needed
+      return {
+        willDropout: prediction.willDropout || false,
+        riskLevel: prediction.riskLevel || 'MEDIUM',
+        riskScore: prediction.riskScore || 50,
+        reasons: Array.isArray(prediction.reasons) ? prediction.reasons : ['Unable to determine specific reasons'],
+        recommendation: prediction.recommendation || 'Continue monitoring student progress.',
+        analysis: prediction.analysis || 'Analysis unavailable'
+      };
+    } catch (parseError) {
+      console.error('JSON parse error:', parseError);
+      // Fallback: Rule-based prediction
+      return generateFallbackPrediction(avgMarks, failedSubjects, answers);
+    }
   } catch (error) {
-    console.error('Ollama error:', error);
-    return `Assessment complete. Risk Level: ${prediction.riskLevel}. ${prediction.recommendation}`;
+    console.error('AI prediction error:', error);
+    return generateFallbackPrediction(avgMarks, failedSubjects, answers);
   }
 }
-
+ 
+// Fallback prediction if AI fails
+function generateFallbackPrediction(avgMarks, failedSubjects, answers) {
+  let score = 0;
+  const reasons = [];
+  // Academic factors
+  if (failedSubjects >= 3) {
+    score += 40;
+    reasons.push(`Failed ${failedSubjects} subjects`);
+  } else if (failedSubjects >= 2) {
+    score += 25;
+    reasons.push(`Failed ${failedSubjects} subjects`);
+  }
+  if (avgMarks < 40) {
+    score += 30;
+    reasons.push(`Low average: ${avgMarks.toFixed(1)}%`);
+  } else if (avgMarks < 50) {
+    score += 15;
+    reasons.push(`Below average: ${avgMarks.toFixed(1)}%`);
+  }
+  // Study habits
+  if (answers.study_hours && answers.study_hours < 2) {
+    score += 15;
+    reasons.push('Insufficient study time');
+  }
+  // Attendance
+  if (answers.attendance && answers.attendance < 75) {
+    score += 20;
+    reasons.push(`Low attendance: ${answers.attendance}%`);
+  }
+  // Support system
+  if (answers.support_system === false) {
+    score += 15;
+    reasons.push('No academic support system');
+  }
+  // Motivation
+  if (answers.motivation && answers.motivation <= 5) {
+    score += 20;
+    reasons.push('Low motivation level');
+  }
+  const riskLevel = score >= 70 ? 'HIGH' : score >= 40 ? 'MEDIUM' : 'LOW';
+  return {
+    willDropout: score >= 70,
+    riskLevel: riskLevel,
+    riskScore: Math.min(score, 100),
+    reasons: reasons.length > 0 ? reasons : ['No significant risk factors identified'],
+    recommendation: getRecommendation(score),
+    analysis: 'Prediction based on academic performance and engagement factors'
+  };
+}
+// Get recommendation based on risk score
+function getRecommendation(score) {
+  if (score >= 70) {
+    return "URGENT: Immediate intervention needed. Schedule one-on-one counseling, assign academic mentor, and create personalized study plan.";
+  } else if (score >= 40) {
+    return "MODERATE RISK: Provide additional support. Offer tutoring sessions, monitor progress weekly, and encourage participation in study groups.";
+  } else {
+    return "LOW RISK: Continue regular monitoring. Provide positive reinforcement and maintain open communication channels.";
+  }
+}
+ 
+// Start chat session
+app.post('/api/start-chat', async (req, res) => {
+  const { studentId, providedMarks } = req.body;
+  // Get student data (all have completed onboarding)
+  const studentData = mockDatabase[studentId] || {
+    student_id: studentId,
+    profile_completed: true,
+    tutorial_completed: true,
+    documents_submitted: true,
+    preferences_set: true,
+    current_step: 'completed',
+    onboarding_started_at: new Date().toISOString(),
+    onboarding_completed_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    email: `${studentId.toLowerCase()}@example.com`
+  };
+  // Initialize session
+  sessions[studentId] = {
+    studentData: studentData,
+    providedMarks: providedMarks || {},
+    collectedMarks: { ...providedMarks } || {},
+    answers: {},
+    currentQuestion: 0,
+    questions: [],
+    conversationContext: { messages: [] }
+  };
+  // Build 5 questions
+  const questions = buildQuestions(providedMarks || {});
+  sessions[studentId].questions = questions;
+  // Get first question
+  if (questions.length > 0) {
+    const firstQuestion = questions[0];
+    const naturalQuestion = await makeQuestionNatural(firstQuestion.text);
+    sessions[studentId].conversationContext.messages.push(`Bot: ${naturalQuestion}`);
+    res.json({ message: naturalQuestion });
+  } else {
+    // No questions, predict immediately
+    const prediction = await generateAIPrediction(
+      providedMarks || {},
+      {},
+      sessions[studentId].conversationContext
+    );
+    res.json({
+      completed: true,
+      prediction: prediction,
+      message: prediction.recommendation
+    });
+  }
+});
+ 
+// Handle chat messages
+app.post('/api/chat', async (req, res) => {
+  const { studentId, message } = req.body;
+  const session = sessions[studentId];
+  if (!session) {
+    return res.status(400).json({ error: 'Session not found' });
+  }
+  // Store user message
+  session.conversationContext.messages.push(`User: ${message}`);
+  // Parse and store answer
+  const currentQuestion = session.questions[session.currentQuestion];
+  const answer = parseAnswer(message, currentQuestion);
+  session.answers[currentQuestion.id] = answer;
+  console.log(`Question: ${currentQuestion.id}, Answer: ${answer}`);
+  // Move to next question
+  session.currentQuestion++;
+  // Check if all questions answered
+  if (session.currentQuestion >= session.questions.length) {
+    console.log('All questions answered. Generating AI prediction...');
+    console.log('Marks:', session.collectedMarks);
+    console.log('Answers:', session.answers);
+    // Generate AI prediction
+    const prediction = await generateAIPrediction(
+      session.collectedMarks,
+      session.answers,
+      session.conversationContext
+    );
+    console.log('Prediction:', prediction);
+    return res.json({
+      completed: true,
+      prediction: prediction,
+      message: `${prediction.analysis}\n\n${prediction.recommendation}`
+    });
+  }
+  // Ask next question
+  const nextQuestion = session.questions[session.currentQuestion];
+  const naturalQuestion = await makeQuestionNatural(nextQuestion.text);
+  session.conversationContext.messages.push(`Bot: ${naturalQuestion}`);
+  res.json({
+    message: naturalQuestion,
+    completed: false
+  });
+});
+ 
+// Start server
 const PORT = 9001;
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);

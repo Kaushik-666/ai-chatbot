@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Magic Bus - Empowering Women & Children Through Education</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      font-family: Arial, sans-serif;
+      background: #f5f7fa;
+    }
+    .collage-bg {
+      display: flex;
+      flex-wrap: wrap;
+      width: 100vw;
+      height: 100vh;
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: -1;
+    }
+    .collage-bg img {
+      width: 20vw;
+      height: 25vh;
+      object-fit: cover;
+      border-radius: 16px;
+      margin: 1vw;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+      border: 4px solid #fff;
+      transition: transform 0.3s;
+    }
+    .collage-bg img:hover {
+      transform: scale(1.05) rotate(-2deg);
+      z-index: 1;
+    }
+    .content {
+      position: relative;
+      z-index: 1;
+      padding: 3rem;
+      color: #222;
+      background: rgba(255,255,255,0.85);
+      max-width: 600px;
+      margin: 5vh auto 2vh auto;
+      border-radius: 24px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+      text-align: center;
+    }
+    h1 {
+      color: #3a86ff;
+      margin-bottom: 1rem;
+    }
+    p {
+      font-size: 1.2rem;
+      color: #444;
+    }
+    .signup-container {
+      position: relative;
+      z-index: 2;
+      background: rgba(255,255,255,0.95);
+      max-width: 400px;
+      margin: 2vh auto 0 auto;
+      padding: 2rem 2rem 1.5rem 2rem;
+      border-radius: 18px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.10);
+      text-align: center;
+    }
+    .signup-container input[type="email"],
+    .signup-container input[type="text"] {
+      width: 90%;
+      padding: 0.7rem;
+      margin: 0.7rem 0;
+      border: 1px solid #bbb;
+      border-radius: 8px;
+      font-size: 1rem;
+    }
+    .signup-container button {
+      background: #3a86ff;
+      color: #fff;
+      border: none;
+      padding: 0.7rem 2rem;
+      border-radius: 8px;
+      font-size: 1rem;
+      cursor: pointer;
+      margin-top: 0.5rem;
+      transition: background 0.2s;
+    }
+    .signup-container button:hover {
+      background: #265bb5;
+    }
+    .message {
+      margin-top: 1rem;
+      font-size: 1rem;
+      color: #e63946;
+    }
+    .success {
+      color: #2dce89;
+    }
+  </style>
+</head>
+<body>
+  <div class="collage-bg">
+    <img src="https://images.unsplash.com/photo-1503676382389-4809596d5290?auto=format&fit=crop&w=800&q=80" alt="Women studying">
+    <img src="https://images.pexels.com/photos/256401/pexels-photo-256401.jpeg?auto=compress&w=800&q=80" alt="Children learning">
+    <img src="https://images.unsplash.com/photo-1464983953574-0892a716854b?auto=format&fit=crop&w=800&q=80" alt="Girl reading">
+    <img src="https://images.pexels.com/photos/1139641/pexels-photo-1139641.jpeg?auto=compress&w=800&q=80" alt="Kids in classroom">
+    <img src="https://images.unsplash.com/photo-1513258496099-48168024aec0?auto=format&fit=crop&w=800&q=80" alt="Women teaching">
+    <img src="https://images.pexels.com/photos/1462630/pexels-photo-1462630.jpeg?auto=compress&w=800&q=80" alt="Children with books">
+    <img src="https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?auto=format&fit=crop&w=800&q=80" alt="Girl writing">
+    <img src="https://images.pexels.com/photos/1181671/pexels-photo-1181671.jpeg?auto=compress&w=800&q=80" alt="Women in library">
+    <img src="https://images.unsplash.com/photo-1519125323398-675f0ddb6308?auto=format&fit=crop&w=800&q=80" alt="Children drawing">
+    <img src="https://images.pexels.com/photos/207691/pexels-photo-207691.jpeg?auto=compress&w=800&q=80" alt="Mother teaching child">
+  </div>
+  <div class="content">
+    <h1>Empowering Women & Children Through Education</h1>
+    <p>
+      Education is the key to unlocking potential and building a brighter future. This collage celebrates the joy, diversity, and power of learning for women and children everywhere.
+    </p>
+  </div>
+  <div class="signup-container" id="signup-container">
+    <h2>Sign Up for Magic Bus</h2>
+    <form id="signup-form">
+      <input type="email" id="email" placeholder="Enter your email" required>
+      <button type="submit">Send OTP</button>
+    </form>
+    <form id="otp-form" style="display:none;">
+      <input type="text" id="otp" placeholder="Enter OTP" maxlength="6" required>
+      <button type="submit">Verify OTP</button>
+    </form>
+    <div class="message" id="message"></div>
+  </div>
+  <script>
+    const signupForm = document.getElementById('signup-form');
+    const otpForm = document.getElementById('otp-form');
+    const messageDiv = document.getElementById('message');
+    let userEmail = '';
+
+    signupForm.addEventListener('submit', function(e) {
+      e.preventDefault();
+      userEmail = document.getElementById('email').value.trim();
+      if (userEmail) {
+        signupForm.style.display = 'none';
+        otpForm.style.display = 'block';
+        messageDiv.innerHTML = "OTP sent to your email";
+        messageDiv.classList.remove('success');
+      }
+    });
+
+    otpForm.addEventListener('submit', function(e) {
+      e.preventDefault();
+      const otp = document.getElementById('otp').value.trim();
+      if (otp === '123456') {
+        messageDiv.textContent = "Login successful! Welcome to Magic Bus.";
+        messageDiv.classList.add('success');
+        otpForm.style.display = 'none';
+      setTimeout(() => {
+        window.location.href = "register.html";
+    }, 1500);
+   } else {
+        messageDiv.textContent = "OTP is invalid. Please try again.";
+        messageDiv.classList.remove('success');
+      }
+    });
+  </script>
+</body>
+</html>

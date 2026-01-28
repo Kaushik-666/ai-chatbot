@@ -1,0 +1,54 @@
+<!-- register.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Magic Bus Registration</title>
+</head>
+<body>
+  <h2>Register for Magic Bus</h2>
+  <form id="uploadForm" enctype="multipart/form-data">
+    <label>Aadhar Card: <input type="file" name="aadhar" accept="image/*,application/pdf" required></label><br>
+    <label>Income Certificate(s): <input type="file" name="income" accept="image/*,application/pdf" multiple></label><br>
+    <label>Education Certificate(s): <input type="file" name="education" accept="image/*,application/pdf" multiple></label><br>
+    <button type="submit">Upload & Scan</button>
+  </form>
+  <div id="scanResult"></div>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script>
+    document.getElementById('uploadForm').onsubmit = async function(e) {
+      e.preventDefault();
+      const files = [
+        ...document.querySelector('input[name="aadhar"]').files,
+        ...document.querySelector('input[name="income"]').files,
+        ...document.querySelector('input[name="education"]').files
+      ];
+      let results = [];
+      for (const file of files) {
+        const text = await Tesseract.recognize(file, 'eng');
+        results.push({filename: file.name, text: text.data.text});
+      }
+      // Display extracted text for verification
+      let html = '<form id="verifyForm">';
+      results.forEach(r => {
+        html += `<h4>${r.filename}</h4><textarea rows="6" cols="60" readonly>${r.text}</textarea><br>`;
+      });
+      html += '<label><input type="checkbox" required> I verify the details are correct</label><br>';
+      html += '<button type="submit">Submit to Databricks</button></form>';
+      document.getElementById('scanResult').innerHTML = html;
+
+      document.getElementById('verifyForm').onsubmit = function(ev) {
+        ev.preventDefault();
+        // Send results to backend for Databricks upload
+        fetch('/api/upload-to-databricks', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(results)
+        }).then(res => res.text()).then(msg => {
+          document.getElementById('scanResult').innerHTML = '<b>' + msg + '</b>';
+        });
+      };
+    };
+  </script>
+</body>
+</html>
